@@ -129,10 +129,15 @@ into one compilation unit (see "Packaging" below), runs it, and compares stdout.
 
 ## Packaging & deploying to AWS
 
-1. Build `bootstrap` for Linux x86_64 (above).
+Lambda sets `AWS_LAMBDA_RUNTIME_API` in the execution environment; the runtime
+reads it automatically either way.
+
+### Zip (managed `provided.al2023` runtime)
+
+1. Build `bootstrap` for the target glibc — build on Amazon Linux 2023 (or a
+   matching base) so the managed `provided.al2023` runtime can run it.
 2. Zip it at the archive root: `zip function.zip bootstrap`.
-3. Create the function on the **OS-only** runtime (`provided.al2023`) with
-   handler name `bootstrap`, e.g.:
+3. Create the function:
 
    ```bash
    aws lambda create-function \
@@ -143,8 +148,21 @@ into one compilation unit (see "Packaging" below), runs it, and compares stdout.
      --zip-file fileb://function.zip
    ```
 
-Lambda sets `AWS_LAMBDA_RUNTIME_API` in the execution environment; the runtime
-reads it automatically.
+### Container image
+
+Build a Lambda-ready image (handler compiled in, Runtime API implemented by this
+runtime) and run it locally through the AWS Runtime Interface Emulator:
+
+```bash
+docker build -f docker/Dockerfile -t zap-lambda-echo .
+docker run --rm -p 9000:8080 zap-lambda-echo &
+curl -s "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{"name":"Zap"}'
+# -> {"message":"Hello, Zap!","request_id":"<uuid>"}
+```
+
+See [`docker/README.md`](docker/README.md) for the build args, ECR/deploy steps,
+and why the image does not use the AWS `provided.al2023` base image today
+(toolchain glibc mismatch — [zap#287](https://github.com/zaplang-io/zap/issues/287)).
 
 ---
 
@@ -159,7 +177,11 @@ test/offline_test.zap    # offline test driver (+ main)
 test/offline_test.expected
 scripts/bootstrap.sh     # handler fragment -> bootstrap executable
 scripts/run-tests.sh     # run the offline test (concat + run + diff)
-.github/workflows/ci.yml # hygiene gate (always) + opt-in full compile/test
+scripts/docker-smoke.sh  # build the Lambda image + invoke it via the RIE
+docker/Dockerfile        # deployable Lambda container image (build + run)
+docker/entrypoint.sh     # RIE locally, bootstrap on Lambda
+docker/README.md         # image build / run / deploy docs
+.github/workflows/ci.yml # hygiene gate (always) + opt-in compile/test + docker
 ```
 
 ### Why the "fragment + concatenate" build?
@@ -207,6 +229,13 @@ exercise). Filed against `zaplang-io/zap`; the high-impact ones:
    only be surfaced as a string; computing "time remaining" needs a `str`→`int`
    parse the stdlib does not expose (`json` has an internal `_i64_str`, not
    public).
+
+6. **Toolchain binaries aren't portable to Amazon Linux 2023**
+   ([#287](https://github.com/zaplang-io/zap/issues/287)) — `zap build` emits a
+   dynamically linked binary against the (Ubuntu 24.04) toolchain base, incl.
+   `libpython3.12`, so it won't run on the AWS `provided.al2023` base image
+   (older glibc). The container image shares the toolchain's base instead; using
+   the AWS base image needs an AL2023/static/musl toolchain.
 
 Known, already-tracked constraints this v1 lives with rather than re-files:
 cross-module linking ([#69](https://github.com/zaplang-io/zap/issues/69)), a

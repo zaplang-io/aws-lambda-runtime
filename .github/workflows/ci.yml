@@ -16,7 +16,7 @@ jobs:
 
       - name: Shell script syntax
         run: |
-          for f in scripts/*.sh; do
+          for f in scripts/*.sh docker/entrypoint.sh; do
             echo "sh -n $f"
             sh -n "$f"
           done
@@ -24,7 +24,7 @@ jobs:
       - name: ShellCheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh docker/entrypoint.sh
 
       - name: Layout sanity
         run: |
@@ -85,3 +85,15 @@ jobs:
           ZAP="$GITHUB_WORKSPACE/zap/target/release/zap" \
             sh scripts/bootstrap.sh "$PWD/examples/echo/handler.zap" -o build/bootstrap
           test -x build/bootstrap
+
+  # Build the deployable Lambda container image and invoke it through the AWS
+  # Runtime Interface Emulator. Opt-in (workflow_dispatch) for v1 — it needs the
+  # published Zap toolchain image (zaplang-io/zap#277); promote to always-on once
+  # that image is available.
+  docker-image:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image and smoke-test via RIE
+        run: ZAP_IMAGE=ghcr.io/zaplang-io/zap:latest sh scripts/docker-smoke.sh
