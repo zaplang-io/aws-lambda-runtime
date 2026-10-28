@@ -1,0 +1,8 @@
+# Keep the build context small: only the sources the Dockerfile COPYs are needed.
+.git/
+build/
+target/
+bootstrap
+.github/
+test/
+*.md

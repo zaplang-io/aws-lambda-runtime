@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Repo hygiene + script lint. Does not compile Zap.
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell script syntax
+        run: |
+          for f in scripts/*.sh docker/entrypoint.sh; do
+            echo "sh -n $f"
+            sh -n "$f"
+          done
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck scripts/*.sh docker/entrypoint.sh
+
+      - name: Layout sanity
+        run: |
+          test -f zap.toml
+          test -f src/runtime.zap
+          test -f examples/echo/handler.zap
+          test -f test/mock_runtime.zap
+          test -f test/offline_test.zap
+          test -s test/offline_test.expected
+          echo "layout OK"
+
+      - name: No CRLF / no tabs in .zap sources
+        run: |
+          ! grep -rlP '\r$' --include='*.zap' . || (echo "CRLF found" && exit 1)
+          ! grep -rlP '\t' --include='*.zap' . || (echo "tab found in .zap" && exit 1)
+
+  # Compile the runtime + run the offline mock Runtime API test using the
+  # prebuilt Zap toolchain image (zaplang-io/zap#277), published to GHCR and
+  # anonymously pullable. The image is a slim compiler image with no git/node,
+  # so `container:` + actions/checkout is not usable; we check out on the host
+  # and run the toolchain via `docker run` over the mounted workspace. Fast and
+  # reproducible — no building the compiler from source.
+  offline-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Offline mock Runtime API test + bootstrap build (Zap image)
+        run: |
+          docker run --rm -v "$PWD":/w -w /w ghcr.io/zaplang-io/zap:latest sh -c '
+            set -e
+            sh scripts/run-tests.sh
+            sh scripts/bootstrap.sh examples/echo/handler.zap -o build/bootstrap
+            test -x build/bootstrap
+          '
+
+  # Build the deployable Lambda container image and invoke it through the AWS
+  # Runtime Interface Emulator. Opt-in (workflow_dispatch) to keep PR CI fast;
+  # it pulls the AWS base image + the RIE and runs a container.
+  docker-image:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image and smoke-test via RIE
+        run: ZAP_IMAGE=ghcr.io/zaplang-io/zap:latest sh scripts/docker-smoke.sh

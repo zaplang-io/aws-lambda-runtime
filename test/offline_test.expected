@@ -1,0 +1,4 @@
+req-ok
+/2018-06-01/runtime/invocation/req-ok/response {"ok": true}
+req-boom
+/2018-06-01/runtime/invocation/req-boom/error {"errorType":"Handler.Error","errorMessage":"kaboom"}
