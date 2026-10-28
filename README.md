@@ -181,7 +181,7 @@ scripts/docker-smoke.sh  # build the Lambda image + invoke it via the RIE
 docker/Dockerfile        # deployable Lambda container image (build + run)
 docker/entrypoint.sh     # RIE locally, bootstrap on Lambda
 docker/README.md         # image build / run / deploy docs
-.github/workflows/ci.yml # hygiene gate (always) + opt-in compile/test + docker
+.github/workflows/ci.yml # hygiene + offline test (GHCR Zap image) + opt-in docker
 ```
 
 ### Why the "fragment + concatenate" build?
@@ -250,9 +250,9 @@ Minor: `ch <- a + b` needs parentheses around the value (`<-` binds tighter than
 
 ## Follow-ups
 
-- Promote the full compile+test CI job to always-on once a distributable `zap`
-  toolchain exists (today it is `workflow_dispatch`-only — building the compiler
-  from source with LLVM 18 is heavy).
+- Wire the `offline-test` job in as a required status check on `main` (the CI
+  now runs the mock Runtime API test on every PR via the published
+  `ghcr.io/zaplang-io/zap` image; branch protection just needs to require it).
 - Become a real `[dependencies]` package (drop the concatenation) when module
   linking lands.
 - A typed `deadline` accessor and a `Lambda-Runtime-Function-Error-Type` header

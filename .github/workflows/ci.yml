@@ -7,8 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Light, always-on gate: repo hygiene + script lint. Does NOT compile Zap —
-  # the Zap toolchain needs an LLVM 18 build (see the `compile-and-test` job).
+  # Repo hygiene + script lint. Does not compile Zap.
   hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -34,10 +33,6 @@ jobs:
           test -f test/mock_runtime.zap
           test -f test/offline_test.zap
           test -s test/offline_test.expected
-          # The concatenated compilation units must be formable.
-          mkdir -p build
-          cat src/runtime.zap examples/echo/handler.zap > build/_check_bootstrap.zap
-          cat src/runtime.zap test/mock_runtime.zap test/offline_test.zap > build/_check_test.zap
           echo "layout OK"
 
       - name: No CRLF / no tabs in .zap sources
@@ -45,51 +40,29 @@ jobs:
           ! grep -rlP '\r$' --include='*.zap' . || (echo "CRLF found" && exit 1)
           ! grep -rlP '\t' --include='*.zap' . || (echo "tab found in .zap" && exit 1)
 
-  # Full gate: build the Zap toolchain from source (LLVM 18) and run the offline
-  # test. Opt-in (workflow_dispatch) for v1 — building the compiler is heavy and
-  # there is no published `zap` release/image yet. Promoting this to an always-on
-  # gate is a follow-up, gated on a distributable toolchain (zaplang-io/zap
-  # releases, zaplang-io/zap#207) or the LLVM 18 dev container image.
-  compile-and-test:
-    if: github.event_name == 'workflow_dispatch'
+  # Compile the runtime + run the offline mock Runtime API test using the
+  # prebuilt Zap toolchain image (zaplang-io/zap#277), published to GHCR and
+  # anonymously pullable. The image is a slim compiler image with no git/node,
+  # so `container:` + actions/checkout is not usable; we check out on the host
+  # and run the toolchain via `docker run` over the mounted workspace. Fast and
+  # reproducible — no building the compiler from source.
+  offline-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout aws-lambda-runtime
-        uses: actions/checkout@v4
-        with:
-          path: aws-lambda-runtime
+      - uses: actions/checkout@v4
 
-      - name: Checkout zap toolchain
-        uses: actions/checkout@v4
-        with:
-          repository: zaplang-io/zap
-          path: zap
-
-      - name: Install LLVM 18
+      - name: Offline mock Runtime API test + bootstrap build (Zap image)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq llvm-18 llvm-18-dev clang-18 libclang-18-dev libgc-dev
-          echo "LLVM_SYS_180_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
-
-      - name: Build zap (with codegen)
-        working-directory: zap
-        run: cargo build --release -p zapc --features llvm --bin zap
-
-      - name: Run the offline runtime test
-        working-directory: aws-lambda-runtime
-        run: ZAP="$GITHUB_WORKSPACE/zap/target/release/zap" sh scripts/run-tests.sh
-
-      - name: Build the echo bootstrap
-        working-directory: aws-lambda-runtime
-        run: |
-          ZAP="$GITHUB_WORKSPACE/zap/target/release/zap" \
-            sh scripts/bootstrap.sh "$PWD/examples/echo/handler.zap" -o build/bootstrap
-          test -x build/bootstrap
+          docker run --rm -v "$PWD":/w -w /w ghcr.io/zaplang-io/zap:latest sh -c '
+            set -e
+            sh scripts/run-tests.sh
+            sh scripts/bootstrap.sh examples/echo/handler.zap -o build/bootstrap
+            test -x build/bootstrap
+          '
 
   # Build the deployable Lambda container image and invoke it through the AWS
-  # Runtime Interface Emulator. Opt-in (workflow_dispatch) for v1 — it needs the
-  # published Zap toolchain image (zaplang-io/zap#277); promote to always-on once
-  # that image is available.
+  # Runtime Interface Emulator. Opt-in (workflow_dispatch) to keep PR CI fast;
+  # it pulls the AWS base image + the RIE and runs a container.
   docker-image:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
