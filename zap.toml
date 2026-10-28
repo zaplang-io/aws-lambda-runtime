@@ -1,0 +1,20 @@
+# Zap project manifest (zap.toml). TOML, Cargo-style (D-0052).
+#
+# `aws-lambda-runtime` is an official-tier package (D-0056): the AWS Lambda
+# custom runtime for Zap (I#89a / design 0011-aws-sdk.md). It implements the AWS
+# Lambda Runtime API contract so a handler written in Zap can be packaged as the
+# `bootstrap` executable an AWS custom runtime expects. It needs no SigV4 and no
+# botocore models — only the `http`, `net`, `json` and `os` stdlib modules.
+#
+# NOTE (v1): cross-package / cross-file linking is not wired in the toolchain
+# yet (pkg manager, zaplang-io/zap#69). A `bootstrap` today is built by
+# concatenating this package's `src/runtime.zap` with a handler fragment into a
+# single compilation unit — see scripts/bootstrap.sh and the README. The
+# manifest is included so the layout matches the Zap package format and so this
+# becomes an ordinary `[dependencies]` entry the day module linking lands.
+[package]
+name = "aws-lambda-runtime"
+version = "0.1.0"
+
+[dependencies]
+# None. The runtime is pure stdlib (http + net + json + os).
